@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: ShipShape friendly DevOps troubleshooter
+Parameters:
+  OpenAIModel:
+    Type: String
+    Default: gpt-4.1-mini
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    MinLength: 1
+  FrontendOrigin:
+    Type: String
+    Description: Exact HTTPS Amplify origin, for example https://main.xxxxx.amplifyapp.com
+Resources:
+  TroubleshooterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/
+      Handler: handler.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_MODEL: !Ref OpenAIModel
+          FRONTEND_ORIGIN: !Ref FrontendOrigin
+      Events:
+        Troubleshoot:
+          Type: HttpApi
+          Properties:
+            Path: /troubleshoot
+            Method: POST
+        Options:
+          Type: HttpApi
+          Properties:
+            Path: /troubleshoot
+            Method: OPTIONS
+Outputs:
+  ApiUrl:
+    Description: HTTPS API Gateway endpoint
+    Value: !Sub https://${ServerlessHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}

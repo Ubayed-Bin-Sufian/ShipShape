@@ -1,0 +1,4 @@
+/* Keep the main troubleshooting card spacious and centered on desktop. */
+.workspace {
+  grid-template-columns: minmax(0, 1fr);
+}

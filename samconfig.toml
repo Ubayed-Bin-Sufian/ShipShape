@@ -4,10 +4,9 @@ version = 0.1
 stack_name = "ShipShape"
 resolve_s3 = true
 s3_prefix = "ShipShape"
-region = "ap-southeast-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "OpenAIModel=\"gpt-4.1-mini\" FrontendOrigin=\"http://localhost:5173/\""
+parameter_overrides = "OpenAIModel=\"gpt-4.1-mini\" FrontendOrigin=\"https://main.d15f6pzg85kulh.amplifyapp.com\""
 image_repositories = []
 
 [default.global.parameters]

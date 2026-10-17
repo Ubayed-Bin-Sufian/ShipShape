@@ -12,6 +12,10 @@ Parameters:
   FrontendOrigin:
     Type: String
     Description: Exact HTTPS Amplify origin, for example https://main.xxxxx.amplifyapp.com
+  FalkorDBUrl:
+    Type: String
+    NoEcho: true
+    Default: redis://localhost:6379
 Resources:
   TroubleshooterFunction:
     Type: AWS::Serverless::Function
@@ -26,6 +30,8 @@ Resources:
           OPENAI_API_KEY: !Ref OpenAIApiKey
           OPENAI_MODEL: !Ref OpenAIModel
           FRONTEND_ORIGIN: !Ref FrontendOrigin
+          FALKORDB_URL: !Ref FalkorDBUrl
+          FALKORDB_GRAPH_NAME: shipshape_ops
       Events:
         Troubleshoot:
           Type: HttpApi
@@ -37,6 +43,11 @@ Resources:
           Properties:
             Path: /troubleshoot
             Method: OPTIONS
+        Investigate:
+          Type: HttpApi
+          Properties:
+            Path: /investigate
+            Method: POST
 Outputs:
   ApiUrl:
     Description: HTTPS API Gateway endpoint

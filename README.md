@@ -1,5 +1,19 @@
 # ShipShape — Your Friendly DevOps Troubleshooter
 
+## ShipShape Graph
+
+The hackathon experience adds a read-only `/investigate` endpoint backed by FalkorDB. It retrieves services, dependencies, deployments, and historical incidents using Cypher, then gives that evidence to OpenAI. The response distinguishes graph evidence from the model's inference and includes relevant relationships. FalkorDB is essential to the conclusion; the backend returns `503` if the graph is unavailable rather than inventing evidence.
+
+Run the local graph:
+
+```bash
+docker compose -f docker-compose.falkordb.yml up -d
+export FALKORDB_URL=redis://localhost:6379
+python3 -c "import sys; sys.path.insert(0, 'backend'); from graph_client import GraphClient; GraphClient.from_environment().initialize_demo_graph()"
+```
+
+The hosted Lambda requires a reachable `FALKORDB_URL`; `localhost` is only for local development. Do not put this value in frontend `VITE_*` variables.
+
 ShipShape is a calm, read-only AI helper for Linux, Docker, Git, and GitHub Actions errors. The browser calls an API Gateway HTTPS endpoint; Lambda invokes OpenAI's Responses API using a backend-only API key. It never runs suggested commands or changes infrastructure.
 
 ## Local setup

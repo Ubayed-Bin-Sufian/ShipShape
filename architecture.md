@@ -12,12 +12,15 @@ flowchart LR
     Website[AWS Amplify\nHosts the website]
     API[API Gateway\nReceives the request]
     Lambda[AWS Lambda\nRuns Python code]
-    OpenAI[OpenAI API\nExplains the error]
+    OpenAI[OpenAI API\nExplains the evidence]
+    Graph[FalkorDB\nServices, deployments, incidents]
 
     User --> Website
     User --> API
     API --> Lambda
     Lambda --> OpenAI
+    Lambda --> Graph
+    Graph --> Lambda
     OpenAI --> Lambda
     Lambda --> API
     API --> User
@@ -182,6 +185,12 @@ The answer appears in four parts:
 - The website shows a readable message and offers retry behavior where appropriate.
 
 ## Keeping secrets safe
+
+## FalkorDB graph schema
+
+ShipShape Graph uses `shipshape_ops` with `Service`, `Dependency`, `Deployment`, and `Incident` nodes. Relationships are `DEPENDS_ON`, `USES_DEPENDENCY`, `DEPLOYED`, `AFFECTS`, `CAUSED_BY`, and `SIMILAR_TO`. The investigation queries service/dependency matches, recent deployments, affected historical incidents, and incident-to-deployment paths. Empty results are preserved as uncertainty; they are never replaced with fabricated evidence.
+
+Local development uses `docker-compose.falkordb.yml`. Hosted Lambda deployments need a reachable TLS-capable FalkorDB endpoint; a local Docker database cannot be reached from AWS Lambda.
 
 There are two different types of information in this application:
 

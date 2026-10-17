@@ -6,7 +6,7 @@ resolve_s3 = true
 s3_prefix = "ShipShape"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "OpenAIModel=\"gpt-4.1-mini\" FrontendOrigin=\"https://main.d15f6pzg85kulh.amplifyapp.com\""
+parameter_overrides = "OpenAIModel=\"gpt-4.1-mini\" FrontendOrigin=\"https://main.d15f6pzg85kulh.amplifyapp.com\" FalkorDBUrl=\"redis://your-hosted-falkordb:6379\""
 image_repositories = []
 
 [default.global.parameters]

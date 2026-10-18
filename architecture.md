@@ -1,309 +1,190 @@
-# ShipShape: Simple Architecture Guide
+# ShipShape Graph architecture
 
-ShipShape is a small web application that helps people understand DevOps errors. A user pastes an error message, and ShipShape asks an AI model for safe troubleshooting suggestions.
+ShipShape Graph investigates DevOps incidents using connected operational data. The original `/troubleshoot` route remains available, while the hackathon flow uses `/investigate`.
 
-This document explains how the pieces fit together in beginner-friendly language.
-
-## The big picture
+## System flow
 
 ```mermaid
 flowchart LR
-    User[Your browser]
-    Website[AWS Amplify\nHosts the website]
-    API[API Gateway\nReceives the request]
-    Lambda[AWS Lambda\nRuns Python code]
-    OpenAI[OpenAI API\nExplains the evidence]
-    Graph[FalkorDB\nServices, deployments, incidents]
-
-    User --> Website
-    User --> API
-    API --> Lambda
-    Lambda --> OpenAI
-    Lambda --> Graph
-    Graph --> Lambda
-    OpenAI --> Lambda
-    Lambda --> API
-    API --> User
+  User[Browser] --> Frontend[React/Vite]
+  Frontend -->|POST /investigate| API[API Gateway or SAM local API]
+  API --> Lambda[Python backend/handler.py]
+  Lambda -->|read-only Cypher| Falkor[(FalkorDB shipshape_ops)]
+  Falkor --> Lambda
+  Lambda -->|incident plus graph evidence| OpenAI[OpenAI Responses API]
+  OpenAI --> Lambda
+  Lambda --> Frontend
 ```
 
-In simple terms:
+The graph query happens before the OpenAI call. The model receives the incident text and a serialized graph-facts context. The frontend receives structured advice and evidence; it does not connect to FalkorDB directly.
 
-1. Amplify shows the website.
-2. The website sends an error message to API Gateway.
-3. API Gateway passes the message to Lambda.
-4. Lambda sends the message to OpenAI.
-5. OpenAI creates troubleshooting advice.
-6. Lambda sends that advice back to the website.
-
-## What each part does
-
-### 1. The frontend: the website users see
-
-The frontend is inside the `frontend/` folder. It is built with React, Vite, and TypeScript.
-
-It provides:
-
-- A friendly introduction.
-- A large box where users paste an error.
-- Three example errors users can try.
-- A “Help me debug” button.
-- A loading message while the answer is being created.
-- A clear answer divided into sections:
-  - Plain-English explanation
-  - Likely cause
-  - Safe diagnostic steps
-  - Verification commands
-- Friendly messages for empty input, network problems, and server problems.
-- A reminder not to paste passwords, tokens, private keys, or other secrets.
-
-The website does not contain the OpenAI API key. It only knows the public API Gateway URL.
-
-### 2. AWS Amplify: where the website lives
-
-AWS Amplify Hosting stores and serves the finished frontend files. It gives the website an HTTPS address, such as:
-
-```text
-https://main.example.amplifyapp.com
-```
-
-HTTPS means the connection between the user's browser and the website is encrypted.
-
-Amplify gets the code from GitHub. Whenever the configured branch changes, Amplify can build and publish the newest version.
-
-The file `amplify.yml` tells Amplify how to build the website:
-
-1. Go into the `frontend` folder.
-2. Install the packages.
-3. Run the production build.
-4. Publish the `frontend/dist` folder.
-
-### 3. API Gateway: the front door for the backend
-
-Amazon API Gateway gives Lambda a public HTTPS address. The frontend sends requests to:
-
-```text
-POST /troubleshoot
-```
-
-The word `POST` means the browser is sending information to the server.
-
-The request looks like this:
-
-```json
-{
-  "error_text": "docker: permission denied while trying to connect to the Docker daemon socket"
-}
-```
-
-API Gateway passes this request to Lambda. It also helps handle browser security rules called CORS. CORS tells the backend which website is allowed to call it.
-
-### 4. AWS Lambda: the Python backend
-
-Lambda runs the Python code in `backend/handler.py`. There is no server to manage or keep running. AWS starts the function when a request arrives and stops it when the work is finished.
-
-Lambda does the following:
-
-1. Checks whether the request is valid JSON.
-2. Checks that `error_text` exists and is not empty.
-3. Rejects messages longer than 12,000 characters.
-4. Sends the error to OpenAI.
-5. Checks that the AI answer has the expected sections.
-6. Sends the answer back to the browser.
-
-Lambda does not run commands from the AI answer. It does not log in to servers, change AWS resources, or modify the user's computer.
-
-### 5. OpenAI: the AI service
-
-Lambda uses the official OpenAI Python package and the Responses API. The AI receives:
-
-- A safety instruction.
-- The user's error text.
-- A required answer format.
-
-The AI must return these four sections:
-
-```json
-{
-  "explanation": "What the error means",
-  "likely_cause": "What probably caused it",
-  "diagnostic_steps": ["Safe things to check"],
-  "verification_commands": ["Commands the user can review"]
-}
-```
-
-The commands are only displayed on the screen. ShipShape never runs them automatically.
-
-## How one request works
+## Request sequence
 
 ```mermaid
 sequenceDiagram
-    participant User as User
-    participant Site as ShipShape website
-    participant Gateway as API Gateway
-    participant Function as Lambda
-    participant AI as OpenAI
+  participant U as User
+  participant F as React frontend
+  participant A as API/SAM
+  participant L as Lambda handler
+  participant G as FalkorDB
+  participant M as OpenAI
 
-    User->>Site: Paste an error
-    User->>Site: Click Help me debug
-    Site->>Gateway: Send error_text
-    Gateway->>Function: Pass the request
-    Function->>Function: Check the input
-    Function->>AI: Ask for safe structured advice
-    AI-->>Function: Return explanation and steps
-    Function->>Function: Check the AI answer
-    Function-->>Gateway: Return JSON
-    Gateway-->>Site: Return the answer
-    Site-->>User: Show troubleshooting advice
+  U->>F: Enter incident and submit
+  F->>A: POST /investigate
+  A->>L: Validate request
+  L->>G: Query matching services/dependencies
+  G-->>L: Service relationship rows
+  L->>G: Query deployments and incidents
+  G-->>L: Deployment, incident, and path rows
+  L->>M: Incident plus graph facts
+  M-->>L: Structured explanation and guidance
+  L-->>F: Evidence, relationships, confidence, diagnostics
+  F-->>U: Render investigation
 ```
 
-## What the user experiences
+## Backend modules
 
-### Before sending
+- `backend/handler.py`: validates requests, routes `/investigate` and `/troubleshoot`, calls OpenAI for non-empty graph investigations, formats CORS/error responses, and returns the deterministic empty-evidence result.
+- `backend/graph_client.py`: creates a FalkorDB client from `FALKORDB_URL`, selects the configured graph, runs read-only queries with timeouts, and seeds the demo graph.
+- `backend/investigation.py`: owns term extraction, Cypher query strings, evidence retrieval, and graph context formatting.
+- `backend/graph_schema.py`: owns the `shipshape_ops` name, seed Cypher, and reset query.
 
-The user sees the introduction and can either paste an error or click an example prompt.
+## Graph schema
 
-### While sending
+The seed graph contains:
 
-The button changes to a loading state. This tells the user that the request is being processed.
+| Label | Properties |
+|---|---|
+| `Service` | `id`, `name`, `description`, `environment` |
+| `Dependency` | `id`, `name`, `kind`, `owner_service` |
+| `Deployment` | `id`, `service_id`, `version`, `deployed_at`, `status`, `change_summary` |
+| `Incident` | `id`, `title`, `error_pattern`, `occurred_at`, `severity`, `status`, `root_cause`, `resolution_summary` |
 
-### After a successful answer
+Relationships:
 
-The answer appears in four parts:
+- `DEPENDS_ON`: service to service.
+- `USES_DEPENDENCY`: service to database/cache dependency.
+- `DEPLOYED`: deployment to service.
+- `AFFECTS`: incident to affected service.
+- `CAUSED_BY`: incident to associated deployment.
+- `SIMILAR_TO`: incident to related historical incident.
 
-1. **In plain English** — a simple explanation.
-2. **Likely cause** — the most probable reason.
-3. **Safe diagnostic steps** — things to check before changing anything.
-4. **Verify the fix** — commands the user can review and run manually.
+The dataset is synthetic and deterministic. It includes Web API, Orders Service, Payments Service, Auth Service, PostgreSQL, Redis, deployments, and known payment/auth incidents.
 
-### If something goes wrong
+## Investigation queries
 
-- Empty input is handled in the browser.
-- Invalid input receives a `400` response.
-- A busy OpenAI service receives a `429` response.
-- A temporary provider problem receives a `502` response.
-- Unexpected server problems receive a general `500` response.
-- The website shows a readable message and offers retry behavior where appropriate.
+The authoritative query definitions are `backend/investigation.py:QUERIES`.
 
-## Keeping secrets safe
+Service/dependency matching:
 
-## FalkorDB graph schema
-
-ShipShape Graph uses `shipshape_ops` with `Service`, `Dependency`, `Deployment`, and `Incident` nodes. Relationships are `DEPENDS_ON`, `USES_DEPENDENCY`, `DEPLOYED`, `AFFECTS`, `CAUSED_BY`, and `SIMILAR_TO`. The investigation queries service/dependency matches, recent deployments, affected historical incidents, and incident-to-deployment paths. Empty results are preserved as uncertainty; they are never replaced with fabricated evidence.
-
-Local development uses `docker-compose.falkordb.yml`. Hosted Lambda deployments need a reachable TLS-capable FalkorDB endpoint; a local Docker database cannot be reached from AWS Lambda.
-
-There are two different types of information in this application:
-
-### Safe to put in the frontend
-
-```text
-VITE_API_URL
+```cypher
+MATCH (s:Service)-[r:DEPENDS_ON|USES_DEPENDENCY]->(target)
+WHERE toLower(s.name) CONTAINS toLower($term)
+   OR toLower(target.name) CONTAINS toLower($term)
+RETURN s.id, s.name, type(r), target.id, target.name LIMIT 25
 ```
 
-This is just the public address of API Gateway. It is not a password.
+This returns both sides of a relationship. The implementation collects both `s.id` and `target.id`, preventing a match such as Orders-to-Payments from hiding Payments evidence.
 
-### Must stay in the backend
+Deployment retrieval:
 
-```text
-OPENAI_API_KEY
+```cypher
+MATCH (d:Deployment)-[:DEPLOYED]->(s:Service)
+WHERE s.id IN $service_ids
+RETURN d.id, d.version, d.deployed_at, d.status, d.change_summary, s.id
+ORDER BY d.deployed_at DESC LIMIT 10
 ```
 
-This is a private key. It must never be placed in React code, a `VITE_*` variable, GitHub source code, or a committed `.env` file.
+Historical incident retrieval:
 
-For a small demo, the key is configured on Lambda during deployment. For a more serious production application, store it in AWS Secrets Manager and allow only Lambda to read it.
+```cypher
+MATCH (i:Incident)-[:AFFECTS]->(s:Service)
+WHERE s.id IN $service_ids
+RETURN i.id, i.title, i.error_pattern, i.occurred_at, i.root_cause, s.id
+ORDER BY i.occurred_at DESC LIMIT 10
+```
 
-Users should also remove secrets from error logs before pasting them into ShipShape. Examples include:
+Incident/deployment path retrieval:
 
-- Passwords
-- AWS access keys
-- OpenAI keys
-- GitHub tokens
-- Private SSH keys
-- Database connection strings
+```cypher
+MATCH p=(i:Incident)-[:AFFECTS]->(s:Service)<-[:DEPLOYED]-(d:Deployment)
+WHERE i.id IN $incident_ids
+RETURN i.id, s.id, d.id, d.version LIMIT 20
+```
 
-## How the AWS resources are created
+## Evidence and diagnosis behavior
 
-The file `template.yaml` is an AWS SAM template. SAM is a simpler way to describe serverless AWS resources.
+For non-empty evidence, OpenAI receives:
 
-The template creates:
+- The original incident text.
+- The graph facts under `services`, `deployments`, `incidents`, and `paths`.
+- Instructions to separate facts, inferences, and hypotheses; avoid invented graph data; and use low confidence when evidence is missing or contradictory.
 
-- One Lambda function.
-- One API Gateway HTTP API.
-- A connection between the API and Lambda.
-- Environment settings for Lambda.
+The frontend response fields are:
 
-The basic deployment process is:
+- `explanation`
+- `likely_cause`
+- `diagnostic_steps`
+- `verification_commands`
+- `evidence`
+- `relationships`
+- `confidence`
+- `graph_evidence`
+
+### Empty-evidence path
+
+If all four retrieved evidence sections are empty, `handler.py` returns HTTP 200 with:
+
+- An explanation that no matching graph facts exist.
+- A likely cause stating that evidence is insufficient.
+- `confidence: "low"`.
+- Evidence containing `No matching graph facts were retrieved.`.
+- Empty relationships.
+- Safe diagnostic and verification guidance.
+- The raw empty `graph_evidence` object.
+
+OpenAI is not called in this branch, so the application cannot turn an empty graph into an invented service, deployment, or incident.
+
+### Graph failure path
+
+If the FalkorDB client cannot connect or a query fails, the endpoint returns HTTP 503 with a clear graph-service error. It does not fall back to mocked graph evidence.
+
+## Local networking
 
 ```mermaid
 flowchart LR
-    Code[Code in GitHub]
-    Build[sam build]
-    Deploy[sam deploy]
-    AWS[AWS Lambda + API Gateway]
-    AmplifyDeploy[Amplify build]
-    Website[Amplify HTTPS website]
-
-    Code --> Build --> Deploy --> AWS
-    Code --> AmplifyDeploy --> Website
-    Website -. uses API URL .-> AWS
+  HostSeed[Host Python seed process] -->|localhost:6379| DB[(Compose falkordb)]
+  SAM[SAM Lambda container] -->|falkordb:6379| DB
+  Browser[127.0.0.1:5173] -->|127.0.0.1:3000| SAMAPI[SAM local API]
 ```
 
-## Beginner deployment checklist
+`docker-compose.falkordb.yml` defines service `falkordb` and publishes port 6379. Compose creates the project network `shipshape_default`. A host process uses `redis://localhost:6379` through the published port. SAM's Lambda container must use `redis://falkordb:6379` and start with `--docker-network shipshape_default` so Docker DNS can resolve the service name.
 
-1. Make sure the backend tests pass:
+The browser origin must exactly match `FRONTEND_ORIGIN`; `localhost:5173` and `127.0.0.1:5173` are different origins.
 
-   ```bash
-   python3 -m unittest discover -s backend/tests -p 'test_*.py'
-   ```
+## Local setup summary
 
-2. Build the frontend:
+1. Create `.venv` and install `backend/requirements.txt`.
+2. Run `docker compose -f docker-compose.falkordb.yml up -d`.
+3. Seed with host-side `FALKORDB_URL=redis://localhost:6379`.
+4. Run `sam build`.
+5. Start SAM with `FALKORDB_URL=redis://falkordb:6379` and `--docker-network shipshape_default`.
+6. Set frontend `VITE_API_URL=http://127.0.0.1:3000`.
+7. Run the Vite dev server and open `http://127.0.0.1:5173`.
 
-   ```bash
-   cd frontend
-   npm run build
-   ```
+## Safety boundaries
 
-3. Build the AWS package:
+OpenAI credentials and FalkorDB connection settings are backend-only. User input is validated and bounded. Suggested commands are displayed only; no command execution, automatic infrastructure change, or remediation occurs. The graph uses synthetic data for local demonstration.
 
-   ```bash
-   cd ..
-   sam build
-   ```
+## Verification
 
-4. Deploy the backend:
+Backend tests are in `backend/tests/`. The relevant commands are:
 
-   ```bash
-   sam deploy --guided
-   ```
-
-5. Copy the API URL printed by SAM.
-6. Add that URL to Amplify as `VITE_API_URL`.
-7. Deploy the frontend through Amplify.
-8. Copy the Amplify HTTPS URL.
-9. Update Lambda's `FrontendOrigin` to the exact Amplify URL.
-10. Test the application from the Amplify URL.
-
-## What happens when the user clicks the button
-
-The full process is:
-
-```text
-User clicks the button
-        ↓
-React sends POST /troubleshoot
-        ↓
-API Gateway receives the request
-        ↓
-Lambda checks the request
-        ↓
-Lambda asks OpenAI for structured advice
-        ↓
-Lambda checks the answer
-        ↓
-API Gateway sends the answer back
-        ↓
-React displays the four answer sections
+```bash
+.venv/bin/python -m unittest discover -s backend/tests -p 'test_*.py'
+npm run build --prefix frontend
+git diff --check
 ```
 
-The important safety idea is that ShipShape is an advisor, not an automation tool. It explains what a user may want to check, but the user remains in control of every command and infrastructure change.
+The empty-evidence tests verify empty query results, low confidence, explicit insufficiency, and that OpenAI is not called. The traversal tests verify service, deployment, incident, and path query sequencing.
 

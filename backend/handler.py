@@ -92,6 +92,24 @@ def investigate(error_text: str) -> dict[str, Any]:
     except GraphUnavailable:
         LOGGER.exception("FalkorDB investigation unavailable")
         return response(503, {"message": "The graph investigation service is unavailable right now."})
+    if not any(evidence.values()):
+        return response(200, {
+            "explanation": "The seeded graph contains no matching service, dependency, deployment, or historical incident for this report.",
+            "likely_cause": "The available graph evidence is insufficient to determine a root cause. Any external change is only a hypothesis and must be verified.",
+            "diagnostic_steps": [
+                "Confirm the affected service and environment from runtime logs or your service catalog.",
+                "Check recent deployments, configuration changes, and dependency health outside the seeded graph.",
+                "Collect a timestamp, request identifier, and safe error excerpt for the next investigation.",
+            ],
+            "verification_commands": [
+                "Review the affected service logs for the incident window.",
+                "Review the deployment history for the affected service.",
+            ],
+            "evidence": ["No matching graph facts were retrieved."],
+            "relationships": [],
+            "confidence": "low",
+            "graph_evidence": evidence,
+        })
     try:
         result = openai_client.responses.create(model=OPENAI_MODEL, instructions=INVESTIGATION_SYSTEM, input=f"Incident:\n{error_text}\n\n{evidence_context(evidence)}", text={"format": INVESTIGATION_SCHEMA}, temperature=0.1, max_output_tokens=1200)
         parsed = json.loads(result.output_text)

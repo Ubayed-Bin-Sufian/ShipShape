@@ -30,4 +30,17 @@ class HandlerTests(unittest.TestCase):
         result = handler.handler({**self.event({"error_text":"payment timeout"}), "requestContext":{"http":{"method":"POST","path":"/investigate"}}}, None)
         self.assertEqual(result["statusCode"], 503)
 
+    @patch.object(handler, "OPENAI_API_KEY", "test-key")
+    @patch.object(handler, "openai_client")
+    @patch.object(handler, "GraphClient")
+    def test_empty_graph_returns_uncertainty_without_llm_claims(self, graph, client):
+        graph.from_environment.return_value.query.return_value = []
+        result = handler.handler({**self.event({"error_text":"quantum toaster meltdown"}), "requestContext":{"http":{"method":"POST","path":"/investigate"}}}, None)
+        body = json.loads(result["body"])
+        self.assertEqual(result["statusCode"], 200)
+        self.assertEqual(body["confidence"], "low")
+        self.assertIn("insufficient", body["likely_cause"])
+        self.assertEqual(body["graph_evidence"], {"services": [], "deployments": [], "incidents": [], "paths": []})
+        client.responses.create.assert_not_called()
+
 if __name__ == "__main__": unittest.main()

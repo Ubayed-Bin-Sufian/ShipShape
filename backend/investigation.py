@@ -33,7 +33,10 @@ def retrieve_evidence(client: Any, incident_text: str) -> dict[str, Any]:
     service_rows: list[Any] = []
     for term in _terms(incident_text):
         service_rows.extend(client.query(QUERIES["services"], {"term": term}))
-    service_ids = list(dict.fromkeys([row[0] for row in service_rows if row and row[0]]))
+    # Keep both ends of each matched relationship. A query may match a dependency
+    # by its target name (for example Orders -> Payments), and dropping the target
+    # would hide the deployment and incident evidence we need next.
+    service_ids = list(dict.fromkeys([service_id for row in service_rows if row for service_id in (row[0], row[3]) if service_id]))
     deployments = client.query(QUERIES["deployments"], {"service_ids": service_ids}) if service_ids else []
     incidents = client.query(QUERIES["incidents"], {"service_ids": service_ids}) if service_ids else []
     incident_ids = list(dict.fromkeys([row[0] for row in incidents if row and row[0]]))

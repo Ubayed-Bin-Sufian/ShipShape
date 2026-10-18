@@ -24,6 +24,13 @@ class InvestigationTests(unittest.TestCase):
         self.assertEqual(retrieve_evidence(graph, "x y"), {"services": [], "deployments": [], "incidents": [], "paths": []})
         graph.query.assert_not_called()
 
+    def test_empty_graph_evidence_is_explicit(self):
+        graph = Mock()
+        graph.query.return_value = []
+        evidence = retrieve_evidence(graph, "quantum toaster meltdown")
+        self.assertEqual(evidence, {"services": [], "deployments": [], "incidents": [], "paths": []})
+        self.assertIn("empty sections", __import__("investigation").evidence_context(evidence))
+
 
 if __name__ == "__main__":
     unittest.main()
